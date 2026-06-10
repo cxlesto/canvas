@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Platformer SAT Engine</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            border: 2px solid #444;
+            background-color: #111;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        #ui {
+            margin-top: 10px;
+            font-size: 14px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="ui">
+        <strong>Controls:</strong> A, D to Move Left/Right | W or Spacebar to Jump
+    </div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+// --- VECTOR MATH HELPER ---
+const Vector = {
+    create: (x = 0, y = 0) => ({ x, y }),
+    sub: (v1, v2) => ({ x: v1.x - v2.x, y: v1.y - v2.y }),
+    dot: (v1, v2) => v1.x * v2.x + v1.y * v2.y,
+    perp: (v) => ({ x: -v.y, y: v.x }),
+    normalize: (v) => {
+        const len = Math.hypot(v.x, v.y);
+        return len === 0 ? { x: 0, y: 0 } : { x: v.x / len, y: v.y / len };
+    }
+};
+
+// --- KEYBOARD INPUTS ---
+const keys = { a: false, d: false, w: false, " ": false };
+
+window.addEventListener("keydown", (e) => { 
+    const key = e.key.toLowerCase();
+    if (key in keys) keys[key] = true; 
+});
+window.addEventListener("keyup", (e) => { 
+    const key = e.key.toLowerCase();
+    if (key in keys) keys[key] = false; 
+});
+
+// --- GAME OBJECTS ---
+class Player {
+    constructor(x, y, width, height) {
+        this.pos = Vector.create(x, y);
+        this.vel = Vector.create(0, 0);
+        this.width = width;
+        this.height = height;
+        
+        // Physics constants
+        this.speed = 4;
+        this.gravity = 0.5;
+        this.jumpForce = -10;
+        
+        this.isGrounded = false;
+        this.isColliding = false;
+    }
+
+    getVertices() {
+        const halfW = this.width / 2;
+        const halfH = this.height / 2;
+        
+        // Axis-aligned bounding box vertices for standard platforming
+        return [
+            { x: this.pos.x - halfW, y: this.pos.y - halfH },
+            { x: this.pos.x + halfW, y: this.pos.y - halfH },
+            { x: this.pos.x + halfW, y: this.pos.y + halfH },
+            { x: this.pos.x - halfW, y: this.pos.y + halfH }
+        ];
+    }
+
+    update() {
+        // Horizontal Movement
+        this.vel.x = 0;
+        if (keys.a) this.vel.x = -this.speed;
+        if (keys.d) this.vel.x = this.speed;
+
+        // Apply Gravity
+        this.vel.y += this.gravity;
+
+        // Jump Input (Only allowed if touching a surface below)
+        if ((keys.w || keys[" "]) && this.isGrounded) {
+            this.vel.y = this.jumpForce;
+            this.isGrounded = false;
+        }
+
+        // Apply Velocity to Position
+        this.pos.x += this.vel.x;
+        this.pos.y += this.vel.y;
+
+        // Screen boundary reset if falling forever
+        if (this.pos.y > canvas.height + 100) {
+            this.pos = Vector.create(100, 100);
+            this.vel = Vector.create(0, 0);
+        }
+    }
+
+    draw() {
+        const vertices = this.getVertices();
+        ctx.beginPath();
+        ctx.moveTo(vertices[0].x, vertices[0].y);
+        for(let i = 1; i < vertices.length; i++) {
+            ctx.lineTo(vertices[i].x, vertices[i].y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = this.isGrounded ? "#44ff44" : "#44ccff";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+}
+
+class StaticPlatform {
+    constructor(points) {
+        // points parameter is an array of raw {x, y} coordinates defining the shape
+        this.vertices = points;
+        
+        // Calculate a rough center for the SAT push direction check
+        let totalX = 0, totalY = 0;
+        this.vertices.forEach(v => { totalX += v.x; totalY += v.y; });
+        this.pos = Vector.create(totalX / this.vertices.length, totalY / this.vertices.length);
+    }
+
+    getVertices() {
+        return this.vertices;
+    }
+
+    draw() {
+        ctx.beginPath();
+        ctx.moveTo(this.vertices[0].x, this.vertices[0].y);
+        for(let i = 1; i < this.vertices.length; i++) {
+            ctx.lineTo(this.vertices[i].x, this.vertices[i].y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = "#444455";
+        ctx.fill();
+        ctx.strokeStyle = "#777788";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+}
+
+// --- SAT COLLISION CORE ALGORITHM ---
+function getAxes(vertices) {
+    const axes = [];
+    for (let i = 0; i < vertices.length; i++) {
+        const p1 = vertices[i];
+        const p2 = vertices[(i + 1) % vertices.length];
+        const edge = Vector.sub(p2, p1);
+        const normal = Vector.normalize(Vector.perp(edge));
+        axes.push(normal);
+    }
+    return axes;
+}
+
+function project(vertices, axis) {
+    let min = Vector.dot(vertices[0], axis);
+    let max = min;
+    for (let i = 1; i < vertices.length; i++) {
+        const p = Vector.dot(vertices[i], axis);
+        if (p < min) min = p;
+        if (p > max) max = p;
+    }
+    return { min, max };
+}
+
+function checkSATCollision(shapeA, shapeB) {
+    const vertsA = shapeA.getVertices();
+    const vertsB = shapeB.getVertices();
+
+    const axes = [...getAxes(vertsA), ...getAxes(vertsB)];
+    
+    let minOverlap = Infinity;
+    let overlapAxis = null;
+
+    for (let axis of axes) {
+        const projA = project(vertsA, axis);
+        const projB = project(vertsB, axis);
+
+        if (projA.max < projB.min || projB.max < projA.min) {
+            return null; 
+        }
+
+        const overlap = Math.min(projA.max, projB.max) - Math.max(projA.min, projB.min);
+        if (overlap < minOverlap) {
+            minOverlap = overlap;
+            overlapAxis = axis;
+        }
+    }
+
+    const d = Vector.sub(shapeB.pos, shapeA.pos);
+    if (Vector.dot(d, overlapAxis) < 0) {
+        overlapAxis = { x: -overlapAxis.x, y: -overlapAxis.y };
+    }
+
+    return { overlap: minOverlap, axis: overlapAxis };
+}
+
+// --- LEVEL DESIGN (Custom Polygons) ---
+const player = new Player(100, 100, 30, 40);
+const platforms = [
+    // Ground floor
+    new StaticPlatform([{x: 0, y: 550}, {x: 800, y: 550}, {x: 800, y: 600}, {x: 0, y: 600}]),
+    // Slanted wedge obstacle
+    new StaticPlatform([{x: 500, y: 550}, {x: 700, y: 450}, {x: 700, y: 550}]),
+    // Floating flat platform
+    new StaticPlatform([{x: 150, y: 420}, {x: 400, y: 420}, {x: 400, y: 450}, {x: 150, y: 450}]),
+    // High angled slope platform
+    new StaticPlatform([{x: 450, y: 280}, {x: 750, y: 220}, {x: 750, y: 250}, {x: 450, y: 310}])
+];
+
+// --- MAIN GAME LOOP ---
+function loop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 1. Physics Frame Step
+    player.update();
+    
+    // Assume airborne until proven grounded by collision
+    player.isColliding = false;
+    player.isGrounded = false;
+
+    // 2. Collision Phase & Resolution
+    for (let platform of platforms) {
+        const collision = checkSATCollision(player, platform);
+        if (collision) {
+            player.isColliding = true;
+
+            // Push the player out of the platform geometry
+            player.pos.x -= collision.axis.x * collision.overlap;
+            player.pos.y -= collision.axis.y * collision.overlap;
+
+            // --- PLATFORM PHYSICS RESOLUTION ---
+            // If the collision push axis points upward, the player is landing on something
+            if (collision.axis.y > 0.5) {
+                player.isGrounded = true;
+                if (player.vel.y > 0) {
+                    player.vel.y = 0; // Stop downward gravity momentum
+                }
+            }
+            // If the push axis points downward, they hit their head on a ceiling
+            else if (collision.axis.y < -0.5) {
+                if (player.vel.y < 0) {
+                    player.vel.y = 0; // Stop upward jumping momentum
+                }
+            }
+        }
+    }
+
+    // 3. Render
+    platforms.forEach(p => p.draw());
+    player.draw();
+
+    requestAnimationFrame(loop);
+}
+
+// Start Game
+loop();
+</script>
+
+</body>
+</html>

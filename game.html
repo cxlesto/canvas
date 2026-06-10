@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Top-Down 2D SAT Game</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            background-color: #11141a;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border: 2px solid #3b4252;
+            border-radius: 4px;
+        }
+        #ui {
+            margin-top: 15px;
+            text-align: center;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #a3be8c;
+        }
+    </style>
+</head>
+<body>
+
+    <h2 style="margin: 0 0 10px 0; color: #88c0d0;">Top-Down SAT Sandbox</h2>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="ui">
+        <strong>Controls:</strong> W, A, S, D to Move | Q / E to Rotate Player | Mouse moves the Hexagon Obstacle
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// --- Vector Math Helpers ---
+const Vector = {
+    create: (x = 0, y = 0) => ({ x, y }),
+    sub: (v1, v2) => ({ x: v1.x - v2.x, y: v1.y - v2.y }),
+    dot: (v1, v2) => v1.x * v2.x + v1.y * v2.y,
+    perp: (v) => ({ x: -v.y, y: v.x }), // Left-hand perpendicular vector
+    normalize: (v) => {
+        const len = Math.hypot(v.x, v.y);
+        return len === 0 ? { x: 0, y: 0 } : { x: v.x / len, y: v.y / len };
+    }
+};
+
+// --- Rigid Body (Polygon) Class ---
+class Polygon {
+    constructor(x, y, vertices, color = '#bf616a') {
+        this.pos = Vector.create(x, y);
+        this.localVertices = vertices; // Array of Vector objects relative to center
+        this.angle = 0;
+        this.color = color;
+    }
+
+    // Computes world-space position of vertices using current position and rotation angle
+    getTransformedVertices() {
+        const cos = Math.cos(this.angle);
+        const sin = Math.sin(this.angle);
+        return this.localVertices.map(v => ({
+            x: this.pos.x + (v.x * cos - v.y * sin),
+            y: this.pos.y + (v.x * sin + v.y * cos)
+        }));
+    }
+
+    // Generates normal vectors for every outer face edge
+    getNormals() {
+        const vertices = this.getTransformedVertices();
+        const normals = [];
+        for (let i = 0; i < vertices.length; i++) {
+            const current = vertices[i];
+            const next = vertices[(i + 1) % vertices.length];
+            const edge = Vector.sub(next, current);
+            normals.push(Vector.normalize(Vector.perp(edge)));
+        }
+        return normals;
+    }
+
+    // Projects all polygon vertices onto a single continuous checking axis
+    project(axis) {
+        const vertices = this.getTransformedVertices();
+        let min = Vector.dot(vertices[0], axis);
+        let max = min;
+        for (let i = 1; i < vertices.length; i++) {
+            const projection = Vector.dot(vertices[i], axis);
+            if (projection < min) min = projection;
+            if (projection > max) max = projection;
+        }
+        return { min, max };
+    }
+
+    draw(context) {
+        const vertices = this.getTransformedVertices();
+        context.beginPath();
+        context.moveTo(vertices[0].x, vertices[0].y);
+        for (let i = 1; i < vertices.length; i++) {
+            context.lineTo(vertices[i].x, vertices[i].y);
+        }
+        context.closePath();
+        context.fillStyle = this.color;
+        context.fill();
+        context.strokeStyle = '#d8dee9';
+        context.lineWidth = 2;
+        context.stroke();
+    }
+}
+
+// --- Separating Axis Theorem (SAT) Core Engine ---
+function checkSATCollision(polyA, polyB) {
+    let overlap = Infinity;
+    let smallestAxis = null;
+
+    // Collect separating lines from both shapes
+    const axes = [...polyA.getNormals(), ...polyB.getNormals()];
+
+    for (const axis of axes) {
+        const projA = polyA.project(axis);
+        const projB = polyB.project(axis);
+
+        // Check if project shadows overlap
+        if (projA.max < projB.min || projB.max < projA.min) {
+            return null; // A gap exists! Shapes do not collide.
+        }
+
+        // Calculate penetration length
+        const currentOverlap = Math.min(projA.max, projB.max) - Math.max(projA.min, projB.min);
+        if (currentOverlap < overlap) {
+            overlap = currentOverlap;
+            smallestAxis = axis;
+        }
+    }
+
+    // Ensure collision push-out vector points correctly from PolyA away from PolyB
+    const direction = Vector.sub(polyA.pos, polyB.pos);
+    if (Vector.dot(smallestAxis, direction) < 0) {
+        smallestAxis = { x: -smallestAxis.x, y: -smallestAxis.y };
+    }
+
+    return {
+        overlap: overlap,
+        axis: smallestAxis // Minimum Translation Vector Direction
+    };
+}
+
+// --- Shape Definitions ---
+const createBoxVertices = (w, h) => [
+    Vector.create(-w/2, -h/2), Vector.create(w/2, -h/2),
+    Vector.create(w/2, h/2),   Vector.create(-w/2, h/2)
+];
+
+const createHexagonVertices = (radius) => {
+    const verts = [];
+    for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i;
+        verts.push(Vector.create(Math.cos(a) * radius, Math.sin(a) * radius));
+    }
+    return verts;
+};
+
+// --- Game Object Instantiation ---
+const player = new Polygon(150, 300, createBoxVertices(50, 50), '#81a1c1');
+const staticBox = new Polygon(400, 200, createBoxVertices(120, 80), '#4c566a');
+const mouseHex = new Polygon(0, 0, createHexagonVertices(60), '#b48ead');
+
+// Add non-uniform rotation to static map elements
+staticBox.angle = 0.4; 
+
+const entities = [staticBox, mouseHex];
+
+// --- Input Handling ---
+const keys = {};
+window.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
+window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
+
+let mousePos = Vector.create(600, 450);
+canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mousePos.x = e.clientX - rect.left;
+    mousePos.y = e.clientY - rect.top;
+});
+
+// --- Main Game Loop ---
+function update() {
+    const moveSpeed = 4;
+    const rotateSpeed = 0.04;
+
+    // Movement Processing
+    if (keys['w']) { player.pos.y -= moveSpeed; }
+    if (keys['s']) { player.pos.y += moveSpeed; }
+    if (keys['a']) { player.pos.x -= moveSpeed; }
+    if (keys['d']) { player.pos.x += moveSpeed; }
+    if (keys['q']) { player.angle -= rotateSpeed; }
+    if (keys['e']) { player.angle += rotateSpeed; }
+
+    // Lock dynamic mouse polygon position
+    mouseHex.pos.x = mousePos.x;
+    mouseHex.pos.y = mousePos.y;
+    mouseHex.angle += 0.0005; // Gentle ambient rotation
+
+    // SAT Resolution System
+    entities.forEach(obstacle => {
+        obstacle.color = obstacle === mouseHex ? '#b48ead' : '#4c566a'; // Reset default palette
+        
+        const collision = checkSATCollision(player, obstacle);
+        if (collision) {
+            // Apply immediate structural translation along the axis of minimum penetration
+            player.pos.x += collision.axis.x * collision.overlap;
+            player.pos.y += collision.axis.y * collision.overlap;
+            
+            obstacle.color = '#bf616a'; // Visual alert color change on collision
+        }
+    });
+}
+
+function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw Environment Grid lines
+    ctx.strokeStyle = '#2e3440';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < canvas.width; i += 40) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+    }
+    for (let j = 0; j < canvas.height; j += 40) {
+        ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(canvas.width, j); ctx.stroke();
+    }
+
+    // Render Game Elements
+    staticBox.draw(ctx);
+    mouseHex.draw(ctx);
+    player.draw(ctx);
+}
+
+function loop() {
+    update();
+    render();
+    requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>

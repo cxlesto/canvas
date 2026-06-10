@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Top-Down SAT Physics Game</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            background-color: #11141a;
+            border: 2px solid #4a5568;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        }
+        #controls {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #a0aec0;
+            text-align: center;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+    <h2 style="margin: 5px 0;">Top-Down 2D SAT Collision Demo</h2>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="controls">
+        <strong>Controls:</strong> Arrow Keys / WASD to Move & Rotate Player.<br>
+        <span style="color: #48bb78;">Green Outline</span> = No Collision | 
+        <span style="color: #f56565;">Red Outline & Physical Pushback</span> = SAT Collision Resolved
+    </div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+// --- VECTOR MATH UTILITIES ---
+const Vector = {
+    sub: (v1, v2) => ({ x: v1.x - v2.x, y: v1.y - v2.y }),
+    dot: (v1, v2) => v1.x * v2.x + v1.y * v2.y,
+    perp: (v) => ({ x: -v.y, y: v.x }), // Left-hand perpendicular vector
+    normalize: (v) => {
+        const len = Math.hypot(v.x, v.y);
+        return len === 0 ? { x: 0, y: 0 } : { x: v.x / len, y: v.y / len };
+    }
+};
+
+// --- SEPARATING AXIS THEOREM ENGINE ---
+
+// Project all vertices of a shape onto a specific axis vector
+function projectPolygon(vertices, axis) {
+    let min = Vector.dot(vertices[0], axis);
+    let max = min;
+    for (let i = 1; i < vertices.length; i++) {
+        const projection = Vector.dot(vertices[i], axis);
+        if (projection < min) min = projection;
+        if (projection > max) max = projection;
+    }
+    return { min, max };
+}
+
+// Check if projection intervals overlap, and return the overlap depth
+function getOverlap(proj1, proj2) {
+    if (proj1.max < proj2.min || proj2.max < proj1.min) {
+        return 0; // Separating axis found! No collision possible.
+    }
+    return Math.min(proj1.max, proj2.min) - Math.max(proj1.min, proj2.max);
+}
+
+// Main SAT checking routine. Computes minimum translation vector (MTV) if a collision occurs
+function checkSATCollision(polyA, polyB) {
+    let overlap = Infinity;
+    let smallestAxis = null;
+
+    // Fetch vertices
+    const verticesA = polyA.getVertices();
+    const verticesB = polyB.getVertices();
+
+    // Gather unique face normal axes to test from both polygons
+    const axes = [];
+    
+    // Axes from Polygon A
+    for (let i = 0; i < verticesA.length; i++) {
+        const p1 = verticesA[i];
+        const p2 = verticesA[(i + 1) % verticesA.length];
+        const edge = Vector.sub(p2, p1);
+        axes.push(Vector.normalize(Vector.perp(edge)));
+    }
+    // Axes from Polygon B
+    for (let i = 0; i < verticesB.length; i++) {
+        const p1 = verticesB[i];
+        const p2 = verticesB[(i + 1) % verticesB.length];
+        const edge = Vector.sub(p2, p1);
+        axes.push(Vector.normalize(Vector.perp(edge)));
+    }
+
+    // Evaluate projections along every axis
+    for (let axis of axes) {
+        const projA = projectPolygon(verticesA, axis);
+        const projB = projectPolygon(verticesB, axis);
+        
+        const axisOverlap = Math.min(projA.max, projB.max) - Math.max(projA.min, projB.min);
+
+        // Found a separating axis gap
+        if (projA.max <= projB.min || projB.max <= projA.min) {
+            return null; 
+        }
+
+        // Track the axis with the absolute minimal overlap depth
+        if (axisOverlap < overlap) {
+            overlap = axisOverlap;
+            smallestAxis = axis;
+        }
+    }
+
+    // Ensure the resolution vector points outward from Polygon B relative to Polygon A
+    const centerA = polyA.getCenter();
+    const centerB = polyB.getCenter();
+    const dir = Vector.sub(centerB, centerA);
+    if (Vector.dot(smallestAxis, dir) < 0) {
+        smallestAxis = { x: -smallestAxis.x, y: -smallestAxis.y };
+    }
+
+    return {
+        axis: smallestAxis,
+        depth: overlap
+    };
+}
+
+// --- GAME OBJECT ENTITIES ---
+
+class Player {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.angle = 0;
+        this.speed = 4;
+        this.rotSpeed = 0.05;
+        this.isColliding = false;
+        
+        // Local space configuration coordinates (Triangle shape definition)
+        this.localVertices = [
+            { x: 25, y: 0 },    // Tip
+            { x: -20, y: -20 }, // Bottom-Left
+            { x: -20, y: 20 }   // Bottom-Right
+        ];
+    }
+
+    getCenter() {
+        return { x: this.x, y: this.y };
+    }
+
+    // Compute globally transformed vertices incorporating translation and rotation matrices
+    getVertices() {
+        const cos = Math.cos(this.angle);
+        const sin = Math.sin(this.angle);
+        return this.localVertices.map(v => ({
+            x: this.x + (v.x * cos - v.y * sin),
+            y: this.y + (v.x * sin + v.y * cos)
+        }));
+    }
+
+    update(keys) {
+        // Rotational controls
+        if (keys['ArrowLeft'] || keys['a'] || keys['A']) this.angle -= this.rotSpeed;
+        if (keys['ArrowRight'] || keys['d'] || keys['D']) this.angle += this.rotSpeed;
+
+        // Translational positional updates
+        let moveX = 0;
+        let moveY = 0;
+        if (keys['ArrowUp'] || keys['w'] || keys['W']) {
+            moveX += Math.cos(this.angle) * this.speed;
+            moveY += Math.sin(this.angle) * this.speed;
+        }
+        if (keys['ArrowDown'] || keys['s'] || keys['S']) {
+            moveX -= Math.cos(this.angle) * this.speed;
+            moveY -= Math.sin(this.angle) * this.speed;
+        }
+
+        this.x += moveX;
+        this.y += moveY;
+
+        // Screen boundary safety checks
+        this.x = Math.max(30, Math.min(canvas.width - 30, this.x));
+        this.y = Math.max(30, Math.min(canvas.height - 30, this.y));
+    }
+
+    draw() {
+        const vertices = this.getVertices();
+        ctx.beginPath();
+        ctx.moveTo(vertices[0].x, vertices[0].y);
+        for (let i = 1; i < vertices.length; i++) {
+            ctx.lineTo(vertices[i].x, vertices[i].y);
+        }
+        ctx.closePath();
+
+        // Aesthetic indicators based on engine feedback states
+        ctx.fillStyle = this.isColliding ? "rgba(245, 101, 101, 0.4)" : "rgba(72, 187, 120, 0.4)";
+        ctx.fill();
+        ctx.strokeStyle = this.isColliding ? "#f56565" : "#48bb78";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // Directional pointer line
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.lineTo(vertices[0].x, vertices[0].y);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+}
+
+class Obstacle {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        // Static diamond structure geometry map layout array 
+        this.localVertices = [
+            { x: 0, y: -60 },  // Top Point
+            { x: 80, y: 0 },   // Right Point
+            { x: 0, y: 60 },   // Bottom Point
+            { x: -80, y: 0 }   // Left Point
+        ];
+    }
+
+    getCenter() {
+        return { x: this.x, y: this.y };
+    }
+
+    getVertices() {
+        return this.localVertices.map(v => ({
+            x: this.x + v.x,
+            y: this.y + v.y
+        }));
+    }
+
+    draw() {
+        const vertices = this.getVertices();
+        ctx.beginPath();
+        ctx.moveTo(vertices[0].x, vertices[0].y);
+        for (let i = 1; i < vertices.length; i++) {
+            ctx.lineTo(vertices[i].x, vertices[i].y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = "#4a5568";
+        ctx.fill();
+        ctx.strokeStyle = "#cbd5e0";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+}
+
+// --- ENGINE LOOPS & STATE INITIALIZATIONS ---
+
+const player = new Player(150, 300);
+const obstacle = new Obstacle(450, 300);
+const keys = {};
+
+window.addEventListener('keydown', (e) => keys[e.key] = true);
+window.addEventListener('keyup', (e) => keys[e.key] = false);
+
+function gameLoop() {
+    // 1. Position tracking changes based on user mechanics
+    player.update(keys);
+
+    // 2. Process SAT Collision Checks
+    const mtv = checkSATCollision(player, obstacle);
+
+    if (mtv) {
+        player.isColliding = true;
+        // Positional Correction: Shift the player back out of the obstacle along the collision vector axis
+        player.x -= mtv.axis.x * mtv.depth;
+        player.y -= mtv.axis.y * mtv.depth;
+    } else {
+        player.isColliding = false;
+    }
+
+    // 3. Clear Screen & Render frames
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw background crosshair lines for coordinate orientation reference
+    ctx.strokeStyle = "rgba(255,255,255,0.03)";
+    ctx.lineWidth = 1;
+    for(let i=0; i<canvas.width; i+=40) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+    }
+    for(let j=0; j<canvas.height; j+=40) {
+        ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(canvas.width, j); ctx.stroke();
+    }
+
+    obstacle.draw();
+    player.draw();
+
+    requestAnimationFrame(gameLoop);
+}
+
+// Boot operations init execution
+gameLoop();
+</script>
+
+</body>
+</html>
