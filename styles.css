@@ -10,7 +10,7 @@ html, body {
   overflow: clip;
 }
 
-canvas {
+#canvas {
   display: block;
   position: absolute;
   top: 0;

@@ -1,17 +1,7 @@
-const canvas = document.body.insertBefore(
-  document.createElement("canvas"),
-  document.body.firstChild
-);
 const display = document.getElementById("data");
 
-addEventListener("resize", (function resize() {
-  canvas.width = innerWidth;
-  canvas.height = innerHeight;
-  return resize;
-})());
-
 class Game {
-  canvas = canvas;
+  canvas = document.getElementsByTagName("canvas")[0];
   ctx = this.canvas.getContext("2d");
   components = [];
   unitScale = 2.5;
@@ -517,6 +507,12 @@ class Enemy extends Entity {
 }
 
 const game = new Game;
+
+addEventListener("resize", (function resize() {
+  game.canvas.width = innerWidth;
+  game.canvas.height = innerHeight;
+  return resize;
+})());
 
 const gr = game.ctx.createLinearGradient(0, 0, 1000, 1000);
 gr.addColorStop(0, "black");
