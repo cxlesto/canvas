@@ -134,6 +134,8 @@ class Game {
     <br>x: ${this.player.x}
     <br>y: ${this.player.y}
     <br>${this.player.angle / Math.PI * 180}°
+    <br>(${this.player.speed.x})
+    <br>(${this.player.speed.y})
     `;
 
     this.minimap();
@@ -255,13 +257,14 @@ class Component {
   angle = 0;
   radius = 0;
 
-  constructor(localVertices, color, x, y, health, radius = 0, game) {
+  constructor(localVertices, color, x, y, health, radius = 0, mass = 1, game) {
     this.localVertices = localVertices;
     this.color = color;
     this.x = x;
     this.y = y;
     this.health = health;
     this.radius = radius;
+    this.mass = mass;
     this.game = game;
 
     this.game.components.push(this);
@@ -421,7 +424,7 @@ class Component {
 class Obstacle extends Component {
   constructor(type, sizeOrWidth, heightOrRadius, color, x, y, health, game) {
     if (type === "circle") {
-      super([], color, x, y, health, sizeOrWidth, game);
+      super([], color, x, y, health, sizeOrWidth, Infinity, game);
       return;
     }
 
@@ -444,13 +447,13 @@ class Obstacle extends Component {
       }
     }
 
-    super(vertices, color, x, y, health, 0, game);
+    super(vertices, color, x, y, health, 0, Infinity, game);
   }
 }
 
 class Entity extends Component {
-  constructor(localVertices, color, x, y, speed, health, radius = 0, game) {
-    super(localVertices, color, x, y, health, radius, game);
+  constructor(localVertices, color, x, y, speed, health, radius = 0, mass = 1, game) {
+    super(localVertices, color, x, y, health, radius, mass, game);
     this.speed = { x: 0, y: 0, base: speed };
   }
 
@@ -466,14 +469,26 @@ class Entity extends Component {
 
         const hit = this.collided(component);
         if (hit) {
-          const weight = component instanceof Obstacle ? 1 : 0.5;
+          let pushThis, pushOther;
 
-          this.x += hit.axis.x * hit.depth * weight;
-          this.y += hit.axis.y * hit.depth * weight;
+          if (component.mass === Infinity) {
+            pushThis = 1;
+            pushOther = 0;
+          } else if (this.mass === Infinity) {
+            pushThis = 0;
+            pushOther = 1;
+          } else {
+            const totalMass = this.mass + component.mass;
+            pushThis = component.mass / totalMass;
+            pushOther = this.mass / totalMass;
+          }
+
+          this.x += hit.axis.x * hit.depth * pushThis;
+          this.y += hit.axis.y * hit.depth * pushThis;
 
           if (component instanceof Entity) {
-            component.x -= hit.axis.x * hit.depth * (1 - weight);
-            component.y -= hit.axis.y * hit.depth * (1 - weight);
+            component.x -= hit.axis.x * hit.depth * pushOther;
+            component.y -= hit.axis.y * hit.depth * pushOther;
           }
 
           resolvedAny = true;
@@ -487,13 +502,13 @@ class Entity extends Component {
 
 class Player extends Entity {
   constructor(radius, color, x, y, game) {
-    super([], color, x, y, 100, 100, radius, game);
+    super([], color, x, y, 100, 100, radius, 10, game);
   }
 }
 
 class Enemy extends Entity {
-  constructor(radius, color, x, y, speed, health, game) {
-    super([], color, x, y, speed, health, radius, game);
+  constructor(radius, color, x, y, speed, health, mass, game) {
+    super([], color, x, y, speed, health, radius, mass, game);
   }
 
   aiTrack(component) {
@@ -526,7 +541,11 @@ const purpleTriangle = new Obstacle("poly", 3, 120, "purple", 400, -100, 0, game
 const cyanHexagon = new Obstacle("poly", 6, 100, "cyan", 200, 600, 0, game);
 const orangeCircle = new Obstacle("circle", 80, 0, "darkorange", 500, 200, 0, game);
 const magentaDodecagon = new Obstacle("poly", 12, 400, "#f06", -100, -500, 0, game);
+const redBlock = new Obstacle("rect", 500, 200, "#f82020", -1000, -100, 0, game);
+const redRect = new Obstacle("rect", 200, 500, "#f82020", -1350, -450, 0, game);
 
 for (let i = 1; i <= 12; i++) {
-  setTimeout(() => new Enemy(20, "orange", -200 - i * 42, -200 - i * 42, 99, 0, game), i * 1000);
+  setTimeout(() => new Enemy(20, "orange", -200 - i * 42, -200 - i * 42, 99, 0, 10, game), i * 1000);
 }
+new Enemy(35, "darkred", 200, 200, 80, 0, 50, game);
+new Enemy(15, "yellow", -200, 200, 150, 0, 2, game);

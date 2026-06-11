@@ -16,8 +16,6 @@ html, body {
   top: 0;
   left: 0;
   z-index: -1;
-
-  /* ~ */
   background: #111;
 }
 
@@ -25,6 +23,5 @@ html, body {
   position: absolute;
   top: 0;
   left: 0;
-
   color: white;
 }
