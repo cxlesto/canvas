@@ -20,7 +20,7 @@ class Game {
   active = true;
   autoSpin = false;
 
-  player = new Player({ radius: 25, color: "red", x: 0, y: 0, game: this});
+  player = new Player(this, { radius: 25, color: "red", x: 0, y: 0 });
   mouse = { x: this.center.x, y: this.center.y };
   keys = [];
 
@@ -68,6 +68,11 @@ class Game {
     }
   }
 
+  init() {
+    this.enemies();
+    this.world();
+  }
+
   update(timestamp) {
     if (!this.active) return;
 
@@ -92,7 +97,7 @@ class Game {
     if (this.keys[this.keybinds.right] || this.keys["arrowright"]) moveX += 1;
 
     if (moveX || moveY) {
-      const length = Math.hypot(moveX, moveY);
+      const length = Math.sqrt(moveX * moveX + moveY * moveY);
 
       this.player.speed.x = moveX / length * this.player.speed.base;
       this.player.speed.y = moveY / length * this.player.speed.base;
@@ -109,13 +114,13 @@ class Game {
     const subDt = dt / substeps;
 
     for (let step = 0; step < substeps; step++) {
-      greenBlock.rotate(1.5 * subDt);
-      blueBlock.rotate(-0.8 * subDt);
-      blackBlock.rotate(2 * subDt);
-      purpleTriangle.rotate(1 * subDt);
-      cyanHexagon.rotate(-0.5 * subDt);
-      orangeCircle.rotate(-0.2 * subDt);
-      magentaDodecagon.rotate(-3 * subDt);
+      this.greenBlock.rotate(1.5 * subDt);
+      this.blueBlock.rotate(-0.8 * subDt);
+      this.blackBlock.rotate(2 * subDt);
+      this.purpleTriangle.rotate(1 * subDt);
+      this.cyanHexagon.rotate(-0.5 * subDt);
+      this.orangeCircle.rotate(-0.2 * subDt);
+      this.magentaDodecagon.rotate(-3 * subDt);
 
       this.components.forEach(component => {
         if (component instanceof Enemy) component.aiTrack(this.player);
@@ -136,6 +141,7 @@ class Game {
     <br>${this.player.angle / Math.PI * 180}°
     <br>(${this.player.speed.x})
     <br>(${this.player.speed.y})
+    <br>[${this.components.length}]
     `;
 
     this.minimap();
@@ -196,7 +202,7 @@ class Game {
       const relX = (component.x - this.player.x) * scale;
       const relY = (component.y - this.player.y) * scale;
 
-      if (Math.hypot(relX, relY) > mapRadius) return;
+      if (Math.sqrt(relX * relX + relY * relY) > mapRadius) return;
 
       if (component instanceof Entity) {
         this.ctx.save();
@@ -234,6 +240,57 @@ class Game {
     this.ctx.restore();
   }
 
+  world() {
+    const gr = this.ctx.createLinearGradient(0, 0, 1000, 1000);
+    gr.addColorStop(0, "black");
+    gr.addColorStop(0.5, "gray");
+    gr.addColorStop(1, "black");
+
+    this.greenBlock = new Entity(this, { type: "rect", width: 200, height: 200, color: "#0f0", x: -100, y: 300 });
+    this.blueBlock = new Entity(this, { type: "rect", width: 400, height: 100, color: "blue", x: -400, y: 100 });
+    this.blackBlock = new Entity(this, { type: "rect", width: 1000, height: 1000, color: gr, x: -100, y: 1500 });
+    this.purpleTriangle = new Entity(this, { type: "poly", sides: 3, radius: 120, color: "purple", x: 400, y: -100 });
+    this.cyanHexagon = new Entity(this, { type: "poly", sides: 6, radius: 100, color: "cyan", x: 200, y: 600 });
+    this.orangeCircle = new Entity(this, { type: "circle", radius: 80, color: "darkorange", x: 500, y: 200 });
+    this.magentaDodecagon = new Entity(this, { type: "poly", sides: 12, radius: 400, color: "#f06", x: -100, y: -500 });
+
+    this.redBlocks = [
+      new Entity(this, { type: "rect", width: 500, height: 200, color: "#f82020", x: -1000, y: -100 }),
+      new Entity(this, { type: "rect", width: 200, height: 500, color: "#f82020", x: -1350, y: -450 })
+    ];
+
+    this.stoneWall = new Entity(this, {
+      type: "rect", width: 200, height: 200, color: "gray", x: -100, y: 300
+    });
+    this.woodenCrate = new Entity(this, {
+      type: "rect", width: 80, height: 80, color: "brown", x: 200, y: 200, mass: 30
+    });
+    this.beachBall = new Entity(this, {
+      type: "circle", radius: 30, color: "pink", x: -200, y: -200, mass: 1
+    });
+  }
+
+  enemies({ amount = 12, normal = true, heavy = true, light = true } = {}) {
+    if (normal) {
+      for (let i = 1; i <= amount; i++) {
+        setTimeout(() => new Enemy(this, {
+          radius: 20,
+          color: "orange",
+          x: -200 - i * 42,
+          y: -200 - i * 42,
+          speed: 99,
+          mass: 100
+        }), i * 1000);
+      }
+    }
+    if (heavy) {
+      new Enemy(this, { radius: 35, color: "darkred", x: 400, y: 400, speed: 80, mass: 500 });
+    }
+    if (light) {
+      new Enemy(this, { radius: 15, color: "yellow", x: -400, y: 400, speed: 150, mass: 20 });
+    }
+  }
+
   rebind(action) {
     const captureKey = e => {
       const key = e.key.toLowerCase();
@@ -256,7 +313,8 @@ class Game {
 class Component {
   angle = 0;
 
-  constructor({ vertices = [], color = "white", x = 0, y = 0, health = 0, radius = 0, mass = Infinity, game }) {
+  constructor(game, { vertices = [], color = "white", x = 0, y = 0, health = 0, radius = 0, mass = Infinity } = {}) {
+    this.game = game;
     this.localVertices = vertices;
     this.color = color;
     this.x = x;
@@ -264,7 +322,6 @@ class Component {
     this.health = health;
     this.radius = radius;
     this.mass = mass;
-    this.game = game;
 
     this.game.components.push(this);
   }
@@ -280,8 +337,7 @@ class Component {
     }));
   }
 
-  getAxes() {
-    const vertices = this.getVertices();
+  getAxes(vertices) {
     const axes = [];
     for (let i = 0; i < vertices.length; i++) {
       const p1 = vertices[i];
@@ -289,7 +345,7 @@ class Component {
 
       const edge = { x: p2.x - p1.x, y: p2.y - p1.y };
       const normal = { x: -edge.y, y: edge.x };
-      const len = Math.hypot(normal.x, normal.y);
+      const len = Math.sqrt(normal.x * normal.x + normal.y * normal.y);
 
       axes.push({ x: normal.x / len, y: normal.y / len });
     }
@@ -299,25 +355,28 @@ class Component {
   getClosestVertex(circleX, circleY) {
     const vertices = this.getVertices();
     let closest = vertices[0];
-    let minDist = Math.hypot(vertices[0].x - circleX, vertices[0].y - circleY);
+    const dx = vertices[0].x - circleX;
+    const dy = vertices[0].y - circleY;
+    let minDist = Math.sqrt(dx * dx + dy * dy);
 
     for (let i = 1; i < vertices.length; i++) {
-      const dist = Math.hypot(vertices[i].x - circleX, vertices[i].y - circleY);
-      if (dist < minDist) {
-        minDist = dist;
+      const vx = vertices[i].x - circleX;
+      const vy = vertices[i].y - circleY;
+      const distSq = vx * vx + vy * vy;
+      if (distSq < minDist * minDist) {
+        minDist = Math.sqrt(distSq);
         closest = vertices[i];
       }
     }
     return closest;
   }
 
-  project(axis) {
+  project(axis, vertices) {
     if (this.radius) {
       const dot = this.x * axis.x + this.y * axis.y;
       return { min: dot - this.radius, max: dot + this.radius };
     }
 
-    const vertices = this.getVertices();
     let min = vertices[0].x * axis.x + vertices[0].y * axis.y;
     let max = min;
 
@@ -332,22 +391,25 @@ class Component {
   collided(component) {
     const axes = [];
 
-    if (!this.radius) axes.push(...this.getAxes());
-    if (!component.radius) axes.push(...component.getAxes());
+    const myVerts = this.getVertices();
+    const otherVerts = component.getVertices();
+
+    if (!this.radius) axes.push(...this.getAxes(myVerts));
+    if (!component.radius) axes.push(...component.getAxes(otherVerts));
 
     if (this.radius && !component.radius) {
       const cv = component.getClosestVertex(this.x, this.y);
       const axis = { x: this.x - cv.x, y: this.y - cv.y };
-      const len = Math.hypot(axis.x, axis.y);
+      const len = Math.sqrt(axis.x * axis.x + axis.y * axis.y);
       if (len > 0) axes.push({ x: axis.x / len, y: axis.y / len });
     } else if (!this.radius && component.radius) {
       const cv = this.getClosestVertex(component.x, component.y);
       const axis = { x: cv.x - component.x, y: cv.y - component.y };
-      const len = Math.hypot(axis.x, axis.y);
+      const len = Math.sqrt(axis.x * axis.x + axis.y * axis.y);
       if (len > 0) axes.push({ x: axis.x / len, y: axis.y / len });
     } else if (this.radius && component.radius) {
       const axis = { x: this.x - component.x, y: this.y - component.y };
-      const len = Math.hypot(axis.x, axis.y);
+      const len = Math.sqrt(axis.x * axis.x + axis.y * axis.y);
       if (len > 0) axes.push({ x: axis.x / len, y: axis.y / len });
     }
 
@@ -355,8 +417,8 @@ class Component {
     let collisionAxis = null;
 
     for (const axis of axes) {
-      const proj1 = this.project(axis);
-      const proj2 = component.project(axis);
+      const proj1 = this.project(axis, myVerts);
+      const proj2 = component.project(axis, otherVerts);
 
       if (proj1.max < proj2.min || proj2.max < proj1.min) return null;
 
@@ -380,7 +442,6 @@ class Component {
 
   update() {
     const { ctx } = this.game;
-    ctx.save();
     ctx.fillStyle = this.color;
 
     const cameraX = this.x - this.game.player.x + this.game.center.x;
@@ -410,18 +471,18 @@ class Component {
       ctx.lineTo(cameraX + Math.cos(this.angle) * this.radius, cameraY + Math.sin(this.angle) * this.radius);
       ctx.stroke();
     }
-
-    ctx.restore();
   }
 
   rotate(angle) {
     this.angle += angle;
-    this.angle = Math.atan2(Math.sin(this.angle), Math.cos(this.angle));
+
+    const twoPi = Math.PI * 2;
+    this.angle -= twoPi * Math.round(this.angle / twoPi);
   }
 }
 
 class Entity extends Component {
-  constructor(config) {
+  constructor(game, config) {
     let vertices = config.vertices || [];
     let radius = config.type === "circle" ? (config.radius || 0) : 0;
 
@@ -441,7 +502,7 @@ class Entity extends Component {
       }
     }
 
-    super({ ...config, vertices, radius });
+    super(game, { ...config, vertices, radius });
 
     this.speed = { x: 0, y: 0, base: config.speed || 0 };
   }
@@ -452,38 +513,39 @@ class Entity extends Component {
 
     for (let loop = 0; loop < 4; loop++) {
       let resolvedAny = false;
+      const { components } = this.game;
 
-      this.game.components.forEach(component => {
-        if (component === this) return;
+      for (let i = 0; i < components.length; i++) {
+        const component = components[i];
+
+        if (component === this) continue;
 
         const hit = this.collided(component);
         if (hit) {
-          let pushThis, pushOther;
+          let pushMe = 0;
+          let pushOther = 0;
 
-          if (component.mass === Infinity) {
-            pushThis = 1;
-            pushOther = 0;
-          } else if (this.mass === Infinity) {
-            pushThis = 0;
-            pushOther = 1;
-          } else if (this.mass === Infinity && component.mass === Infinity) {
-            pushThis = 1;
-            pushOther = 1;
-          } else {
-            const totalMass = this.mass + component.mass;
-            pushThis = component.mass / totalMass;
-            pushOther = this.mass / totalMass;
+          if (this.mass !== Infinity || component.mass !== Infinity) {
+            if (this.mass === Infinity) {
+              pushOther = 1;
+            } else if (component.mass === Infinity) {
+              pushMe = 1;
+            } else {
+              const invTotal = 1 / (this.mass + component.mass);
+              pushMe = component.mass * invTotal;
+              pushOther = this.mass * invTotal;
+            }
           }
 
-          this.x += hit.axis.x * hit.depth * pushThis;
-          this.y += hit.axis.y * hit.depth * pushThis;
+          this.x += hit.axis.x * hit.depth * pushMe;
+          this.y += hit.axis.y * hit.depth * pushMe;
 
           component.x -= hit.axis.x * hit.depth * pushOther;
           component.y -= hit.axis.y * hit.depth * pushOther;
 
           resolvedAny = true;
         }
-      });
+      };
 
       if (!resolvedAny) break;
     }
@@ -491,14 +553,14 @@ class Entity extends Component {
 }
 
 class Player extends Entity {
-  constructor(config) {
-    super({ ...config, type: "circle", speed: 100, health: 100, mass: 100 });
+  constructor(game, config) {
+    super(game, { ...config, type: "circle", speed: 100, health: 100, mass: 100 });
   }
 }
 
 class Enemy extends Entity {
-  constructor(config) {
-    super({ ...config, type: "circle" });
+  constructor(game, config) {
+    super(game, { ...config, type: "circle" });
   }
 
   aiTrack(component) {
@@ -513,50 +575,10 @@ class Enemy extends Entity {
 
 const game = new Game;
 
+game.init();
+
 addEventListener("resize", (function resize() {
   game.canvas.width = innerWidth;
   game.canvas.height = innerHeight;
   return resize;
 })());
-
-const gr = game.ctx.createLinearGradient(0, 0, 1000, 1000);
-gr.addColorStop(0, "black");
-gr.addColorStop(0.5, "gray");
-gr.addColorStop(1, "black");
-
-const greenBlock = new Entity({ type: "rect", width: 200, height: 200, color: "#0f0", x: -100, y: 300, game });
-const blueBlock = new Entity({ type: "rect", width: 400, height: 100, color: "blue", x: -400, y: 100, game });
-const blackBlock = new Entity({ type: "rect", width: 1000, height: 1000, color: gr, x: -100, y: 1500, game });
-const purpleTriangle = new Entity({ type: "poly", sides: 3, radius: 120, color: "purple", x: 400, y: -100, game });
-const cyanHexagon = new Entity({ type: "poly", sides: 6, radius: 100, color: "cyan", x: 200, y: 600, game });
-const orangeCircle = new Entity({ type: "circle", radius: 80, color: "darkorange", x: 500, y: 200, game });
-const magentaDodecagon = new Entity({ type: "poly", sides: 12, radius: 400, color: "#f06", x: -100, y: -500, game });
-const redBlocks = [
-  new Entity({ type: "rect", width: 500, height: 200, color: "#f82020", x: -1000, y: -100, game }),
-  new Entity({ type: "rect", width: 200, height: 500, color: "#f82020", x: -1350, y: -450, game })
-];
-
-const stoneWall = new Entity({
-  type: "rect", width: 200, height: 200, color: "gray", x: -100, y: 300, game
-});
-const woodenCrate = new Entity({
-  type: "rect", width: 80, height: 80, color: "brown", x: 200, y: 200, mass: 30, game
-});
-const beachBall = new Entity({
-  type: "circle", radius: 30, color: "pink", x: -200, y: -200, mass: 1, game
-});
-
-for (let i = 1; i <= 12; i++) {
-  setTimeout(() => new Enemy({
-    radius: 20,
-    color: "orange",
-    x: -200 - i * 42,
-    y: -200 - i * 42,
-    speed: 99,
-    mass: 100,
-    game
-  }), i * 1000);
-}
-
-new Enemy({ radius: 35, color: "darkred", x: 400, y: 400, speed: 80, mass: 500, game });
-new Enemy({ radius: 15, color: "yellow", x: -400, y: 400, speed: 150, mass: 20, game });
