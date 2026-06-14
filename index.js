@@ -39,7 +39,7 @@ class Game {
     addEventListener("keydown", e => {
       const key = e.key.toLowerCase();
       this.keys[key] = true;
-      
+
       if (key === this.keybinds.toggleSpin) {
         this.autoSpin = !this.autoSpin;
       }
@@ -270,7 +270,7 @@ class Game {
     });
   }
 
-  enemies({ amount = 12, normal = true, heavy = true, light = true } = {}) {
+  enemies({ amount = 12, wait = 1000, normal = true, heavy = true, light = true } = {}) {
     if (normal) {
       for (let i = 1; i <= amount; i++) {
         setTimeout(() => new Enemy(this, {
@@ -280,7 +280,7 @@ class Game {
           y: -200 - i * 42,
           speed: 99,
           mass: 100
-        }), i * 1000);
+        }), i * wait);
       }
     }
     if (heavy) {
@@ -351,7 +351,7 @@ class Component {
     }
     return axes;
   }
-  
+
   getClosestVertex(circleX, circleY) {
     const vertices = this.getVertices();
     let closest = vertices[0];
@@ -441,35 +441,34 @@ class Component {
   }
 
   update() {
-    const { ctx } = this.game;
-    ctx.fillStyle = this.color;
+    this.game.ctx.fillStyle = this.color;
 
     const cameraX = this.x - this.game.player.x + this.game.center.x;
     const cameraY = this.y - this.game.player.y + this.game.center.y;
 
-    ctx.beginPath();
+    this.game.ctx.beginPath();
     if (this.radius) {
-      ctx.arc(cameraX, cameraY, this.radius, 0, Math.PI * 2);
+      this.game.ctx.arc(cameraX, cameraY, this.radius, 0, Math.PI * 2);
     } else {
       const vertices = this.getVertices();
       vertices.forEach((v, i) => {
         const vx = v.x - this.game.player.x + this.game.center.x;
         const vy = v.y - this.game.player.y + this.game.center.y;
-        if (!i) ctx.moveTo(vx, vy);
-        else ctx.lineTo(vx, vy);
+        if (!i) this.game.ctx.moveTo(vx, vy);
+        else this.game.ctx.lineTo(vx, vy);
       });
-      ctx.closePath();
+      this.game.ctx.closePath();
     }
 
-    ctx.fill();
+    this.game.ctx.fill();
 
     if (this.radius) {
-      ctx.strokeStyle = "white";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(cameraX, cameraY);
-      ctx.lineTo(cameraX + Math.cos(this.angle) * this.radius, cameraY + Math.sin(this.angle) * this.radius);
-      ctx.stroke();
+      this.game.ctx.strokeStyle = "white";
+      this.game.ctx.lineWidth = 2;
+      this.game.ctx.beginPath();
+      this.game.ctx.moveTo(cameraX, cameraY);
+      this.game.ctx.lineTo(cameraX + Math.cos(this.angle) * this.radius, cameraY + Math.sin(this.angle) * this.radius);
+      this.game.ctx.stroke();
     }
   }
 
@@ -513,11 +512,8 @@ class Entity extends Component {
 
     for (let loop = 0; loop < 4; loop++) {
       let resolvedAny = false;
-      const { components } = this.game;
 
-      for (let i = 0; i < components.length; i++) {
-        const component = components[i];
-
+      for (const component of this.game.components) {
         if (component === this) continue;
 
         const hit = this.collided(component);
