@@ -69,7 +69,7 @@ class Game {
   }
 
   init() {
-    this.enemies();
+    this.enemies({ amount: 12, wait: 0 });
     this.world();
   }
 
@@ -255,8 +255,8 @@ class Game {
     this.magentaDodecagon = new Entity(this, { type: "poly", sides: 12, radius: 400, color: "#f06", x: -100, y: -500 });
 
     this.redBlocks = [
-      new Entity(this, { type: "rect", width: 500, height: 200, color: "#f82020", x: -1000, y: -100 }),
-      new Entity(this, { type: "rect", width: 200, height: 500, color: "#f82020", x: -1350, y: -450 })
+      new Entity(this, { type: "rect", width: 200, height: 500, color: "#f82020", x: -1350, y: -450 }),
+      new Entity(this, { type: "rect", width: 500, height: 200, color: "#f82020", x: -1000, y: -100 })
     ];
 
     this.stoneWall = new Entity(this, {
@@ -312,10 +312,14 @@ class Game {
 
 class Component {
   angle = 0;
+  aabb = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
   constructor(game, { vertices = [], color = "white", x = 0, y = 0, health = 0, radius = 0, mass = Infinity } = {}) {
     this.game = game;
+
     this.localVertices = vertices;
+    this.worldVertices = vertices.map(() => ({ x: 0, y: 0 }));
+
     this.color = color;
     this.x = x;
     this.y = y;
@@ -326,15 +330,40 @@ class Component {
     this.game.components.push(this);
   }
 
-  getVertices() {
-    if (this.radius) return [];
+  updateVertices() {
+    if (this.radius) {
+      this.aabb.minX = this.x - this.radius;
+      this.aabb.maxX = this.x + this.radius;
+      this.aabb.minY = this.y - this.radius;
+      this.aabb.maxY = this.y + this.radius;
+      return this.worldVertices;
+    };
+
     const cos = Math.cos(this.angle);
     const sin = Math.sin(this.angle);
 
-    return this.localVertices.map(p => ({
-      x: this.x + (p.x * cos - p.y * sin),
-      y: this.y + (p.x * sin + p.y * cos)
-    }));
+    let minX = -Infinity, maxX = Infinity, minY = -Infinity, maxY = Infinity;
+
+    for (let i = 0; i < this.localVertices.length; i++) {
+      const p = this.localVertices[i];
+      const vx = this.x + (p.x * cos - p.y * sin);
+      const vy = this.y + (p.x * sin + p.y * cos);
+
+      this.worldVertices[i].x = vx;
+      this.worldVertices[i].y = vy;
+
+      if (vx < minX) minX = vx;
+      if (vx > maxX) maxX = vx;
+      if (vy < minY) minY = vy;
+      if (vy > maxY) maxY = vy;
+    }
+
+    this.aabb.minX = minX;
+    this.aabb.maxX = maxX;
+    this.aabb.minY = minY;
+    this.aabb.maxY = maxY;
+
+    return this.worldVertices;
   }
 
   getAxes(vertices) {
@@ -353,18 +382,20 @@ class Component {
   }
 
   getClosestVertex(circleX, circleY) {
-    const vertices = this.getVertices();
+    const vertices = this.worldVertices;
     let closest = vertices[0];
-    const dx = vertices[0].x - circleX;
-    const dy = vertices[0].y - circleY;
-    let minDist = Math.sqrt(dx * dx + dy * dy);
+
+    const dx = closest.x - circleX;
+    const dy = closest.y - circleY;
+    let minDistSq = dx * dx + dy * dy;
 
     for (let i = 1; i < vertices.length; i++) {
       const vx = vertices[i].x - circleX;
       const vy = vertices[i].y - circleY;
       const distSq = vx * vx + vy * vy;
-      if (distSq < minDist * minDist) {
-        minDist = Math.sqrt(distSq);
+
+      if (distSq < minDistSq) {
+        minDistSq = distSq;
         closest = vertices[i];
       }
     }
@@ -389,10 +420,17 @@ class Component {
   }
 
   collided(component) {
-    const axes = [];
+    const myVerts = this.updateVertices();
+    const otherVerts = component.updateVertices();
 
-    const myVerts = this.getVertices();
-    const otherVerts = component.getVertices();
+    if (
+      this.aabb.maxX < component.aabb.minX ||
+      component.aabb.maxX < this.aabb.minX ||
+      this.aabb.maxY < component.aabb.minY ||
+      component.aabb.maxY < this.aabb.minY
+    ) return null;
+
+    const axes = [];
 
     if (!this.radius) axes.push(...this.getAxes(myVerts));
     if (!component.radius) axes.push(...component.getAxes(otherVerts));
@@ -450,14 +488,13 @@ class Component {
     if (this.radius) {
       this.game.ctx.arc(cameraX, cameraY, this.radius, 0, Math.PI * 2);
     } else {
-      const vertices = this.getVertices();
+      const vertices = this.worldVertices;
       vertices.forEach((v, i) => {
         const vx = v.x - this.game.player.x + this.game.center.x;
         const vy = v.y - this.game.player.y + this.game.center.y;
         if (!i) this.game.ctx.moveTo(vx, vy);
         else this.game.ctx.lineTo(vx, vy);
       });
-      this.game.ctx.closePath();
     }
 
     this.game.ctx.fill();
@@ -507,6 +544,8 @@ class Entity extends Component {
   }
 
   move(dt) {
+    if (this.mass === Infinity) return;
+
     this.x += this.speed.x * this.game.unitScale * dt;
     this.y += this.speed.y * this.game.unitScale * dt;
 
@@ -515,22 +554,21 @@ class Entity extends Component {
 
       for (const component of this.game.components) {
         if (component === this) continue;
+        if (this.mass === Infinity && component.mass === Infinity) continue;
 
         const hit = this.collided(component);
         if (hit) {
           let pushMe = 0;
           let pushOther = 0;
 
-          if (this.mass !== Infinity || component.mass !== Infinity) {
-            if (this.mass === Infinity) {
-              pushOther = 1;
-            } else if (component.mass === Infinity) {
-              pushMe = 1;
-            } else {
-              const invTotal = 1 / (this.mass + component.mass);
-              pushMe = component.mass * invTotal;
-              pushOther = this.mass * invTotal;
-            }
+          if (this.mass === Infinity) {
+            pushOther = 1;
+          } else if (component.mass === Infinity) {
+            pushMe = 1;
+          } else {
+            const invTotal = 1 / (this.mass + component.mass);
+            pushMe = component.mass * invTotal;
+            pushOther = this.mass * invTotal;
           }
 
           this.x += hit.axis.x * hit.depth * pushMe;
