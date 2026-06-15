@@ -1,10 +1,64 @@
-const display = document.getElementById("data");
+class SpatialHash {
+  grid = new Map;
+
+  constructor(cellSize) {
+    this.cellSize = cellSize;
+  }
+
+  clear() {
+    this.grid.clear();
+  }
+
+  insert(component) {
+    const startX = Math.floor(component.aabb.minX / this.cellSize);
+    const endX = Math.floor(component.aabb.maxX / this.cellSize);
+    const startY = Math.floor(component.aabb.minY / this.cellSize);
+    const endY = Math.floor(component.aabb.maxY / this.cellSize);
+
+    for (let x = startX; x <= endX; x++) {
+      for (let y = startY; y <= endY; y++) {
+        const key = `${x},${y}`;
+        if (!this.grid.has(key)) {
+          this.grid.set(key, []);
+        }
+        this.grid.get(key).push(component);
+      }
+    }
+  }
+
+  query(aabb) {
+    const startX = Math.floor(aabb.minX / this.cellSize);
+    const endX = Math.floor(aabb.maxX / this.cellSize);
+    const startY = Math.floor(aabb.minY / this.cellSize);
+    const endY = Math.floor(aabb.maxY / this.cellSize);
+
+    const found = new Set;
+
+    for (let x = startX; x <= endX; x++) {
+      for (let y = startY; y <= endY; y++) {
+        const key = `${x},${y}`;
+        const cell = this.grid.get(key);
+        if (cell) {
+          for (let i = 0; i < cell.length; i++) {
+            found.add(cell[i]);
+          }
+        }
+      }
+    }
+
+    return found;
+  }
+}
 
 class Game {
   canvas = document.getElementsByTagName("canvas")[0];
   ctx = this.canvas.getContext("2d");
+  display = document.getElementById("data");
+
   components = [];
   unitScale = 2.5;
+
+  spatialHash = new SpatialHash(200);
 
   keybinds = {
     up: "w",
@@ -22,7 +76,7 @@ class Game {
 
   player = new Player(this, { radius: 25, color: "red", x: 0, y: 0 });
   mouse = { x: this.center.x, y: this.center.y };
-  keys = [];
+  keys = {};
 
   constructor() {
     addEventListener("mousemove", e => {
@@ -122,18 +176,34 @@ class Game {
       this.orangeCircle.rotate(-0.2 * subDt);
       this.magentaDodecagon.rotate(-3 * subDt);
 
-      this.components.forEach(component => {
-        if (component instanceof Enemy) component.aiTrack(this.player);
-      });
+      this.spatialHash.clear();
+      for (let i = 0; i < this.components.length; i++) {
+        const component = this.components[i];
+        component.updateVertices();
+        this.spatialHash.insert(component);
+      }
 
-      this.components.forEach(component => {
-        if (component instanceof Entity) component.move(subDt);
-      });
+      for (let i = 0; i < this.components.length; i++) {
+        const component = this.components[i];
+        if (component instanceof Enemy) {
+          component.aiTrack(this.player);
+        }
+      }
+
+      for (let i = 0; i < this.components.length; i++) {
+        const component = this.components[i];
+        if (component instanceof Entity) {
+          component.move(subDt);
+        }
+      }
     }
 
-    this.components.forEach(component => component.update());
+    for (let i = 0; i < this.components.length; i++) {
+      const component = this.components[i];
+      component.update();
+    }
 
-    if (display) display.innerHTML = `
+    if (this.display) this.display.innerHTML = `
     ${dt * 1000}ms
     <br>${(1 / dt).toFixed()} fps
     <br>x: ${this.player.x}
@@ -198,13 +268,20 @@ class Game {
     this.ctx.clip();
     this.ctx.translate(x + mapRadius, y + mapRadius);
 
-    this.components.forEach(component => {
+    for (let i = 0; i < this.components.length; i++) {
+      const component = this.components[i];
+
       const relX = (component.x - this.player.x) * scale;
       const relY = (component.y - this.player.y) * scale;
 
-      if (Math.sqrt(relX * relX + relY * relY) > mapRadius) return;
+      if (relX * relX + relY * relY > mapRadius * mapRadius) continue;
 
-      if (component instanceof Entity) {
+      if (component instanceof Enemy) {
+        this.ctx.fillStyle = component.color;
+        this.ctx.beginPath();
+        this.ctx.arc(relX, relY, 3, 0, Math.PI * 2);
+        this.ctx.fill();
+      } else if (component instanceof Entity) {
         this.ctx.save();
         this.ctx.translate(relX, relY);
         this.ctx.rotate(component.angle);
@@ -215,22 +292,18 @@ class Game {
         if (component.radius) {
           this.ctx.arc(0, 0, component.radius * scale, 0, Math.PI * 2);
         } else {
-          component.localVertices.forEach((v, i) => {
+          for (let i = 0; i < component.localVertices.length; i++) {
+            const v = component.localVertices[i];
             if (!i) this.ctx.moveTo(v.x * scale, v.y * scale);
             else this.ctx.lineTo(v.x * scale, v.y * scale);
-          });
+          }
         }
 
         this.ctx.closePath();
         this.ctx.stroke();
         this.ctx.restore();
-      } else if (component instanceof Enemy) {
-        this.ctx.fillStyle = component.color;
-        this.ctx.beginPath();
-        this.ctx.arc(relX, relY, 3, 0, Math.PI * 2);
-        this.ctx.fill();
       }
-    });
+    }
 
     this.ctx.fillStyle = this.player.color;
     this.ctx.beginPath();
@@ -342,7 +415,7 @@ class Component {
     const cos = Math.cos(this.angle);
     const sin = Math.sin(this.angle);
 
-    let minX = -Infinity, maxX = Infinity, minY = -Infinity, maxY = Infinity;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
     for (let i = 0; i < this.localVertices.length; i++) {
       const p = this.localVertices[i];
@@ -420,8 +493,8 @@ class Component {
   }
 
   collided(component) {
-    const myVerts = this.updateVertices();
-    const otherVerts = component.updateVertices();
+    const myVerts = this.worldVertices;
+    const otherVerts = component.worldVertices;
 
     if (
       this.aabb.maxX < component.aabb.minX ||
@@ -454,7 +527,9 @@ class Component {
     let minOverlap = Infinity;
     let collisionAxis = null;
 
-    for (const axis of axes) {
+    for (let i = 0; i < axes.length; i++) {
+      const axis = axes[i];
+
       const proj1 = this.project(axis, myVerts);
       const proj2 = component.project(axis, otherVerts);
 
@@ -488,13 +563,14 @@ class Component {
     if (this.radius) {
       this.game.ctx.arc(cameraX, cameraY, this.radius, 0, Math.PI * 2);
     } else {
-      const vertices = this.worldVertices;
-      vertices.forEach((v, i) => {
+      for (let i = 0; i < this.worldVertices.length; i++) {
+        const v = this.worldVertices[i];
+
         const vx = v.x - this.game.player.x + this.game.center.x;
         const vy = v.y - this.game.player.y + this.game.center.y;
         if (!i) this.game.ctx.moveTo(vx, vy);
         else this.game.ctx.lineTo(vx, vy);
-      });
+      }
     }
 
     this.game.ctx.fill();
@@ -549,10 +625,14 @@ class Entity extends Component {
     this.x += this.speed.x * this.game.unitScale * dt;
     this.y += this.speed.y * this.game.unitScale * dt;
 
+    this.updateVertices();
+
     for (let loop = 0; loop < 4; loop++) {
       let resolvedAny = false;
 
-      for (const component of this.game.components) {
+      const nearbyComponents = this.game.spatialHash.query(this.aabb);
+
+      for (const component of nearbyComponents) {
         if (component === this) continue;
         if (this.mass === Infinity && component.mass === Infinity) continue;
 
