@@ -9,6 +9,10 @@ class SpatialHash {
     this.grid.clear();
   }
 
+  get(x, y) {
+    return x << 16 | y & 0xffff;
+  }
+
   insert(component) {
     const startX = Math.floor(component.aabb.minX / this.cellSize);
     const endX = Math.floor(component.aabb.maxX / this.cellSize);
@@ -17,7 +21,7 @@ class SpatialHash {
 
     for (let x = startX; x <= endX; x++) {
       for (let y = startY; y <= endY; y++) {
-        const key = `${x},${y}`;
+        const key = this.get(x, y);
         if (!this.grid.has(key)) {
           this.grid.set(key, []);
         }
@@ -36,7 +40,7 @@ class SpatialHash {
 
     for (let x = startX; x <= endX; x++) {
       for (let y = startY; y <= endY; y++) {
-        const key = `${x},${y}`;
+        const key = this.get(x, y);
         const cell = this.grid.get(key);
         if (cell) {
           for (let i = 0; i < cell.length; i++) {
@@ -57,6 +61,8 @@ class Game {
 
   components = [];
   unitScale = 2.5;
+  /* ~ */
+  vchecks = 0;
 
   spatialHash = new SpatialHash(200);
 
@@ -104,14 +110,14 @@ class Game {
       this.keys[key] = false;
     });
 
-    addEventListener("blur", () => {
-      this.active = false;
-    });
-
-    addEventListener("focus", () => {
-      this.time = 0;
-      this.active = true;
-      this.animation = requestAnimationFrame(ts => this.update(ts));
+    addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        this.active = false;
+      } else {
+        this.time = 0;
+        this.active = true;
+        this.animation = requestAnimationFrame(ts => this.update(ts));
+      }
     });
   }
 
@@ -123,7 +129,7 @@ class Game {
   }
 
   init() {
-    this.enemies({ amount: 12, wait: 0 });
+    this.enemies({ amount: 1200, wait: 0 });
     this.world();
   }
 
@@ -179,7 +185,6 @@ class Game {
       this.spatialHash.clear();
       for (let i = 0; i < this.components.length; i++) {
         const component = this.components[i];
-        component.updateVertices();
         this.spatialHash.insert(component);
       }
 
@@ -212,6 +217,10 @@ class Game {
     <br>(${this.player.speed.x})
     <br>(${this.player.speed.y})
     <br>[${this.components.length}]
+    <br>*${
+      /* ~ */
+      this.vchecks
+    }*
     `;
 
     this.minimap();
@@ -343,24 +352,28 @@ class Game {
     });
   }
 
-  enemies({ amount = 12, wait = 1000, normal = true, heavy = true, light = true } = {}) {
-    if (normal) {
-      for (let i = 1; i <= amount; i++) {
-        setTimeout(() => new Enemy(this, {
-          radius: 20,
-          color: "orange",
-          x: -200 - i * 42,
-          y: -200 - i * 42,
-          speed: 99,
-          mass: 100
-        }), i * wait);
+  enemies({ amount = 12, wait = 1000, spawn = true, normal = true, heavy = true, light = true } = {}) {
+    if (spawn) {
+      if (normal) {
+        for (let i = 1; i <= amount; i++) {
+          setTimeout(() => new Enemy(this, {
+            radius: 20,
+            color: "orange",
+            x: -200 - i * 42,
+            y: -200 - i * 42,
+            speed: 99,
+            mass: 100
+          }), i * wait);
+        }
       }
-    }
-    if (heavy) {
-      new Enemy(this, { radius: 35, color: "darkred", x: 400, y: 400, speed: 80, mass: 500 });
-    }
-    if (light) {
-      new Enemy(this, { radius: 15, color: "yellow", x: -400, y: 400, speed: 150, mass: 20 });
+  
+      if (heavy) {
+        new Enemy(this, { radius: 35, color: "darkred", x: 400, y: 400, speed: 80, mass: 500 });
+      }
+  
+      if (light) {
+        new Enemy(this, { radius: 15, color: "yellow", x: -400, y: 400, speed: 150, mass: 20 });
+      }
     }
   }
 
@@ -370,10 +383,13 @@ class Game {
       this.keybinds[action] = key;
       removeEventListener("keydown", captureKey);
     }
+
     addEventListener("keydown", captureKey);
   }
 
   clear() {
+    /* ~ */
+    this.vchecks = 0;
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
@@ -386,6 +402,7 @@ class Game {
 class Component {
   angle = 0;
   aabb = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  lapsed = true;
 
   constructor(game, { vertices = [], color = "white", x = 0, y = 0, health = 0, radius = 0, mass = Infinity } = {}) {
     this.game = game;
@@ -401,14 +418,22 @@ class Component {
     this.mass = mass;
 
     this.game.components.push(this);
+    this.updateVertices();
   }
 
   updateVertices() {
+    /* ~ */
+    ++this.game.vchecks;
+
+    if (!this.lapsed) return this.worldVertices;
+
     if (this.radius) {
       this.aabb.minX = this.x - this.radius;
       this.aabb.maxX = this.x + this.radius;
       this.aabb.minY = this.y - this.radius;
       this.aabb.maxY = this.y + this.radius;
+
+      this.lapsed = false;
       return this.worldVertices;
     };
 
@@ -436,6 +461,7 @@ class Component {
     this.aabb.minY = minY;
     this.aabb.maxY = maxY;
 
+    this.lapsed = false;
     return this.worldVertices;
   }
 
@@ -590,11 +616,14 @@ class Component {
 
     const twoPi = Math.PI * 2;
     this.angle -= twoPi * Math.round(this.angle / twoPi);
+
+    this.lapsed = true;
+    this.updateVertices();
   }
 }
 
 class Entity extends Component {
-  constructor(game, config) {
+  constructor(game, config = {}) {
     let vertices = config.vertices || [];
     let radius = config.type === "circle" ? (config.radius || 0) : 0;
 
@@ -625,6 +654,7 @@ class Entity extends Component {
     this.x += this.speed.x * this.game.unitScale * dt;
     this.y += this.speed.y * this.game.unitScale * dt;
 
+    this.lapsed = true;
     this.updateVertices();
 
     for (let loop = 0; loop < 4; loop++) {
@@ -634,6 +664,7 @@ class Entity extends Component {
 
       for (const component of nearbyComponents) {
         if (component === this) continue;
+
         if (this.mass === Infinity && component.mass === Infinity) continue;
 
         const hit = this.collided(component);
@@ -653,9 +684,11 @@ class Entity extends Component {
 
           this.x += hit.axis.x * hit.depth * pushMe;
           this.y += hit.axis.y * hit.depth * pushMe;
+          if (pushMe) this.lapsed = true;
 
           component.x -= hit.axis.x * hit.depth * pushOther;
           component.y -= hit.axis.y * hit.depth * pushOther;
+          if (pushOther) component.lapsed = true;
 
           resolvedAny = true;
         }
@@ -667,13 +700,13 @@ class Entity extends Component {
 }
 
 class Player extends Entity {
-  constructor(game, config) {
+  constructor(game, config = {}) {
     super(game, { ...config, type: "circle", speed: 100, health: 100, mass: 100 });
   }
 }
 
 class Enemy extends Entity {
-  constructor(game, config) {
+  constructor(game, config = {}) {
     super(game, { ...config, type: "circle" });
   }
 
