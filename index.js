@@ -71,8 +71,6 @@ class Game {
 
   components = [];
   unitScale = 2.5;
-  /* ~ */
-  vchecks = 0;
 
   spatialHash = new SpatialHash(200);
 
@@ -227,10 +225,6 @@ class Game {
     <br>(${this.player.speed.x})
     <br>(${this.player.speed.y})
     <br>[${this.components.length}]
-    <br>*${
-      /* ~ */
-      this.vchecks
-    }*
     `;
 
     this.minimap();
@@ -365,7 +359,7 @@ class Game {
   enemies({ amount = 12, wait = 1000, spawn = true, normal = true, heavy = true, light = true } = {}) {
     if (spawn) {
       if (normal) {
-        for (let i = 1; i <= amount; i++) {
+        for (let i = 0; i < amount; i++) {
           setTimeout(() => new Enemy(this, {
             radius: 20,
             color: "orange",
@@ -398,8 +392,6 @@ class Game {
   }
 
   clear() {
-    /* ~ */
-    this.vchecks = 0;
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
@@ -434,9 +426,6 @@ class Component {
   }
 
   updateVertices() {
-    /* ~ */
-    ++this.game.vchecks;
-
     if (!this.lapsed) return this.worldVertices;
 
     if (this.radius) {
@@ -676,9 +665,9 @@ class Entity extends Component {
     for (let loop = 0; loop < 4; loop++) {
       let resolvedAny = false;
 
-      const nearbyComponents = this.game.spatialHash.query(this.aabb);
+      const nearby = this.game.spatialHash.query(this.aabb);
 
-      for (const component of nearbyComponents) {
+      for (const component of nearby) {
         if (component === this) continue;
         if (this.mass === Infinity && component.mass === Infinity) continue;
 
