@@ -1,3 +1,13 @@
+class Category {
+  static none = 0;
+
+  static player = 1;
+  static enemy = 2;
+  static obstacle = 4;
+
+  static all = -1;
+}
+
 class SpatialHash {
   grid = new Map;
 
@@ -404,7 +414,7 @@ class Component {
   aabb = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   lapsed = true;
 
-  constructor(game, { vertices = [], color = "white", x = 0, y = 0, health = 0, radius = 0, mass = Infinity } = {}) {
+  constructor(game, { vertices = [], color = "white", x = 0, y = 0, health = 0, radius = 0, mass = Infinity, category = Category.all, mask = Category.all } = {}) {
     this.game = game;
 
     this.localVertices = vertices;
@@ -416,6 +426,8 @@ class Component {
     this.health = health;
     this.radius = radius;
     this.mass = mass;
+    this.category = category;
+    this.mask = mask;
 
     this.game.components.push(this);
     this.updateVertices();
@@ -643,7 +655,11 @@ class Entity extends Component {
       }
     }
 
-    super(game, { ...config, vertices, radius });
+    super(game, {
+      ...config,
+      vertices,
+      radius
+    });
 
     this.speed = { x: 0, y: 0, base: config.speed || 0 };
   }
@@ -664,8 +680,12 @@ class Entity extends Component {
 
       for (const component of nearbyComponents) {
         if (component === this) continue;
-
         if (this.mass === Infinity && component.mass === Infinity) continue;
+
+        if (
+          (this.mask & component.category) === 0 ||
+          (component.mask & this.category) === 0
+        ) continue;
 
         const hit = this.collided(component);
         if (hit) {
@@ -701,13 +721,27 @@ class Entity extends Component {
 
 class Player extends Entity {
   constructor(game, config = {}) {
-    super(game, { ...config, type: "circle", speed: 100, health: 100, mass: 100 });
+    super(game, {
+      ...config,
+      type: "circle",
+      speed: 100,
+      health: 100,
+      mass: 100,
+      category: Category.player,
+      mask: Category.all
+   
+    });
   }
 }
 
 class Enemy extends Entity {
   constructor(game, config = {}) {
-    super(game, { ...config, type: "circle" });
+    super(game, {
+      ...config,
+      type: "circle",
+      category: Category.enemy,
+      mask: Category.all
+    });
   }
 
   aiTrack(component) {
