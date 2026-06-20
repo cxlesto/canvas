@@ -3,13 +3,13 @@ class Category {
 
   static player = 1;
   static enemy = 2;
-  static obstacle = 4;
+  static structure = 4;
 
   static all = -1;
 }
 
 class SpatialHash {
-  grid = new Map;
+  grid = new Map();
 
   constructor(cellSize) {
     this.cellSize = cellSize;
@@ -46,7 +46,7 @@ class SpatialHash {
     const startY = Math.floor(aabb.minY / this.cellSize);
     const endY = Math.floor(aabb.maxY / this.cellSize);
 
-    const found = new Set;
+    const found = new Set();
 
     for (let x = startX; x <= endX; x++) {
       for (let y = startY; y <= endY; y++) {
@@ -222,8 +222,8 @@ class Game {
     <br>x: ${this.player.x}
     <br>y: ${this.player.y}
     <br>${this.player.angle / Math.PI * 180}°
-    <br>(${this.player.speed.x})
-    <br>(${this.player.speed.y})
+    <br>(${this.player.speed.x + this.player.velocity.x})
+    <br>(${this.player.speed.y + this.player.velocity.y})
     <br>[${this.components.length}]
     `;
 
@@ -370,11 +370,11 @@ class Game {
           }), i * wait);
         }
       }
-  
+
       if (heavy) {
         new Enemy(this, { radius: 35, color: "darkred", x: 400, y: 400, speed: 80, mass: 500 });
       }
-  
+
       if (light) {
         new Enemy(this, { radius: 15, color: "yellow", x: -400, y: 400, speed: 150, mass: 20 });
       }
@@ -436,7 +436,7 @@ class Component {
 
       this.lapsed = false;
       return this.worldVertices;
-    };
+    }
 
     const cos = Math.cos(this.angle);
     const sin = Math.sin(this.angle);
@@ -516,6 +516,7 @@ class Component {
       if (dot < min) min = dot;
       if (dot > max) max = dot;
     }
+
     return { min, max };
   }
 
@@ -624,6 +625,8 @@ class Component {
 }
 
 class Entity extends Component {
+  velocity = { x: 0, y: 0 };
+
   constructor(game, config = {}) {
     let vertices = config.vertices || [];
     let radius = config.type === "circle" ? (config.radius || 0) : 0;
@@ -631,6 +634,7 @@ class Entity extends Component {
     if (config.type === "rect") {
       const hw = config.width / 2;
       const hh = config.height / 2;
+
       vertices = [
         { x: -hw, y: -hh },
         { x: hw, y: -hh },
@@ -651,13 +655,20 @@ class Entity extends Component {
     });
 
     this.speed = { x: 0, y: 0, base: config.speed || 0 };
+
+    this.friction = config.friction ?? 0/* .85 */;
+    this.restitution = config.restitution ?? 0;
   }
 
   move(dt) {
     if (this.mass === Infinity) return;
 
-    this.x += this.speed.x * this.game.unitScale * dt;
-    this.y += this.speed.y * this.game.unitScale * dt;
+    this.x += (this.speed.x * this.game.unitScale + this.velocity.x) * dt;
+    this.y += (this.speed.y * this.game.unitScale + this.velocity.y) * dt;
+
+    const drag = this.friction ** (dt * 60);
+    this.velocity.x *= drag;
+    this.velocity.y *= drag;
 
     this.lapsed = true;
     this.updateVertices();
@@ -699,9 +710,37 @@ class Entity extends Component {
           component.y -= hit.axis.y * hit.depth * pushOther;
           if (pushOther) component.lapsed = true;
 
+          const myVelX = this.velocity.x + this.speed.x * this.game.unitScale;
+          const myVelY = this.velocity.y + this.speed.y * this.game.unitScale;
+          const otherVelX = component.velocity.x + component.speed.x * this.game.unitScale;
+          const otherVelY = component.velocity.y + component.speed.y * this.game.unitScale;
+
+          const rvx = otherVelX - myVelX;
+          const rvy = otherVelY - myVelY;
+
+          const velAlongNormal = rvx * hit.axis.x + rvy * hit.axis.y;
+
+          if (velAlongNormal > 0) {
+            const e = Math.min(this.restitution, component.restitution);
+
+            let j = -(1 + e) * velAlongNormal;
+            const invMyMass = this.mass === Infinity ? 0 : 1 / this.mass;
+            const invOtherMass = component.mass === Infinity ? 0 : 1 / component.mass;
+            j /= invMyMass + invOtherMass;
+
+            const impulseX = j * hit.axis.x;
+            const impulseY = j * hit.axis.y;
+            
+            this.velocity.x -= impulseX * invMyMass;
+            this.velocity.y -= impulseY * invMyMass;
+
+            component.velocity.x += impulseX * invOtherMass;
+            component.velocity.y += impulseY * invOtherMass;
+          }
+
           resolvedAny = true;
         }
-      };
+      }
 
       if (!resolvedAny) break;
     }
@@ -718,7 +757,6 @@ class Player extends Entity {
       mass: 100,
       category: Category.player,
       mask: Category.all
-   
     });
   }
 }
@@ -743,7 +781,7 @@ class Enemy extends Entity {
   }
 }
 
-const game = new Game;
+const game = new Game();
 
 game.init();
 
