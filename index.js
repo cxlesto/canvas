@@ -332,27 +332,49 @@ class Game {
     gr.addColorStop(0.5, "gray");
     gr.addColorStop(1, "black");
 
-    this.greenBlock = new Entity(this, { type: "rect", width: 200, height: 200, color: "#0f0", x: -100, y: 300 });
-    this.blueBlock = new Entity(this, { type: "rect", width: 400, height: 100, color: "blue", x: -400, y: 100 });
-    this.blackBlock = new Entity(this, { type: "rect", width: 1000, height: 1000, color: gr, x: -100, y: 1500 });
-    this.purpleTriangle = new Entity(this, { type: "poly", sides: 3, radius: 120, color: "purple", x: 400, y: -100 });
-    this.cyanHexagon = new Entity(this, { type: "poly", sides: 6, radius: 100, color: "cyan", x: 200, y: 600 });
-    this.orangeCircle = new Entity(this, { type: "circle", radius: 80, color: "darkorange", x: 500, y: 200 });
-    this.magentaDodecagon = new Entity(this, { type: "poly", sides: 12, radius: 400, color: "#f06", x: -100, y: -500 });
+    this.greenBlock = new Structure(this, { type: "rect", width: 200, height: 200, color: "#0f0", x: -100, y: 300 });
+    this.blueBlock = new Structure(this, { type: "rect", width: 400, height: 100, color: "blue", x: -400, y: 100 });
+    this.blackBlock = new Structure(this, { type: "rect", width: 1000, height: 1000, color: gr, x: -100, y: 1500 });
+    this.purpleTriangle = new Structure(this, { type: "poly", sides: 3, radius: 120, color: "purple", x: 400, y: -100 });
+    this.cyanHexagon = new Structure(this, { type: "poly", sides: 6, radius: 100, color: "cyan", x: 200, y: 600 });
+    this.orangeCircle = new Structure(this, { type: "circle", radius: 80, color: "darkorange", x: 500, y: 200 });
+    this.magentaDodecagon = new Structure(this, { type: "poly", sides: 12, radius: 400, color: "#f06", x: -100, y: -500 });
 
     this.redBlocks = [
-      new Entity(this, { type: "rect", width: 200, height: 500, color: "#f82020", x: -1350, y: -450 }),
-      new Entity(this, { type: "rect", width: 500, height: 200, color: "#f82020", x: -1000, y: -100 })
+      new Structure(this, { type: "rect", width: 200, height: 500, color: "#f82020", x: -1350, y: -450 }),
+      new Structure(this, { type: "rect", width: 500, height: 200, color: "#f82020", x: -1000, y: -100 })
     ];
 
-    this.stoneWall = new Entity(this, {
-      type: "rect", width: 200, height: 200, color: "gray", x: -100, y: 300
+    this.stoneWall = new Structure(this, {
+      type: "rect",
+      width: 200,
+      height: 200,
+      color: "gray",
+      x: -100,
+      y: 300
     });
-    this.woodenCrate = new Entity(this, {
-      type: "rect", width: 80, height: 80, color: "brown", x: 200, y: 200, mass: 30
+
+    this.woodenCrate = new Structure(this, {
+      type: "rect",
+      width: 100,
+      height: 100,
+      color: "saddlebrown",
+      x: 200,
+      y: 200,
+      mass: 300,
+      friction: 0.8,
+      restitution: 0.1
     });
-    this.beachBall = new Entity(this, {
-      type: "circle", radius: 30, color: "pink", x: -200, y: -200, mass: 1
+
+    this.beachBall = new Structure(this, {
+      type: "circle",
+      radius: 40,
+      color: "hotpink",
+      x: -200,
+      y: -200,
+      mass: 10,
+      friction: 0.95,
+      restitution: 0.8
     });
   }
 
@@ -683,8 +705,8 @@ class Entity extends Component {
         if (this.mass === Infinity && component.mass === Infinity) continue;
 
         if (
-          (this.mask & component.category) === 0 ||
-          (component.mask & this.category) === 0
+          !(this.mask & component.category) ||
+          !(component.mask & this.category)
         ) continue;
 
         const hit = this.collided(component);
@@ -778,6 +800,26 @@ class Enemy extends Entity {
 
     this.speed.x = Math.cos(this.angle) * this.speed.base;
     this.speed.y = Math.sin(this.angle) * this.speed.base;
+  }
+}
+
+class Structure extends Entity {
+  constructor(game, config = {}) {
+    super(game, {
+      ...config,
+      speed: 0,
+      category: Category.structure,
+      mask: Category.all
+    });
+  }
+
+  move(dt) {
+    if (
+      this.mass === Infinity &&
+      !this.velocity.x &&
+      !this.velocity.y
+    ) return;
+    super.move(dt);
   }
 }
 
